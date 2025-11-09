@@ -1,6 +1,5 @@
 // lib/services/ble_service.dart
-// BLE client for ResQNetBLE — parses manufacturer blob, AD local name (0x08/0x09),
-// discovers services, reads GATT device name (0x2A00), subscribes to telemetry.
+// FIXED: Proper GATT connection, service discovery, and notification subscription
 
 import 'dart:async';
 import 'dart:typed_data';
@@ -15,11 +14,8 @@ import '../models/adv_summary.dart';
 class BleService extends ChangeNotifier {
   final FlutterReactiveBle _ble = FlutterReactiveBle();
 
-  // Raw discovered device info
   final Map<String, DiscoveredDevice> _seenDevicesRaw = {};
-  final Map<String, AdvSummary> devices = {}; // id → parsed summary
-
-  // map deviceId -> best known local name (from adv / DiscoveredDevice.name / GATT read)
+  final Map<String, AdvSummary> devices = {};
   final Map<String, String> deviceLocalNames = {};
 
   StreamSubscription<DiscoveredDevice>? _scanSub;
@@ -28,16 +24,38 @@ class BleService extends ChangeNotifier {
 
   bool scanning = false;
   String permissionStatus = 'unknown';
-  final List<String> logs = [];
+  final List<String> _logs = [];
   final int _maxLogs = 300;
 
+  String? connectedId;
+  bool authorized = false;
+  int lastSeq = -1;
+  DateTime? lastPacketTime;
+  int missedPackets = 0;
+  int totalPacketsReceived = 0;
+  DateTime? connectionTime;
+  bool isSubscribed = false;
+
+  final List<DiscoveredService> _discoveredServices = [];
+
+  DateTime? lastConnectAttempt;
+  final Duration connectBackoff = const Duration(seconds: 6);
+
+  List<String> get logs => List.unmodifiable(_logs);
+  List<DiscoveredService> get discoveredServices =>
+      List.unmodifiable(_discoveredServices);
+
   void _addLog(String msg, {String name = 'ble'}) {
-    final ts = DateTime.now().toIso8601String();
+    final ts = DateTime.now().toIso8601String().substring(11, 23);
     final entry = '[$ts] $msg';
     try {
-      logs.insert(0, entry);
-      if (logs.length > _maxLogs) logs.removeRange(_maxLogs, logs.length);
-    } catch (_) {}
+      _logs.insert(0, entry);
+      if (_logs.length > _maxLogs) {
+        _logs.removeRange(_maxLogs, _logs.length);
+      }
+    } catch (e) {
+      developer.log('Log error: $e');
+    }
     try {
       developer.log(msg, name: name);
     } catch (_) {}
@@ -45,33 +63,19 @@ class BleService extends ChangeNotifier {
   }
 
   void clearLogs() {
-    logs.clear();
-    notifyListeners();
+    _logs.clear();
+    _addLog('🗑️ Logs cleared');
   }
 
-  // === UUIDs (must match server) ===
   final Uuid serviceUuid = Uuid.parse("0000A100-0000-1000-8000-00805F9B34FB");
   final Uuid streamUuid = Uuid.parse("0000A101-0000-1000-8000-00805F9B34FB");
   final Uuid controlUuid = Uuid.parse("0000A103-0000-1000-8000-00805F9B34FB");
-
-  // GATT Device Name characteristic (0x2A00)
   final Uuid gapService = Uuid.parse("00001800-0000-1000-8000-00805f9b34fb");
   final Uuid deviceNameChar = Uuid.parse(
     "00002a00-0000-1000-8000-00805f9b34fb",
   );
 
-  // Auth token
   static const int APP_AUTH_TOKEN = 0xA1B2C3D4;
-
-  // Connection state
-  String? connectedId;
-  bool authorized = false;
-  int lastSeq = -1;
-  DateTime? lastPacketTime;
-  int missedPackets = 0;
-
-  DateTime? lastConnectAttempt;
-  final Duration connectBackoff = const Duration(seconds: 6);
 
   Future<bool> init() async => await _ensurePermissions();
 
@@ -84,28 +88,20 @@ class BleService extends ChangeNotifier {
         Permission.locationWhenInUse,
       ].request();
 
-      bool allGranted = true;
-      for (final s in statuses.values) {
-        if (!(s.isGranted || s.isLimited)) {
-          allGranted = false;
-          break;
-        }
-      }
-
+      bool allGranted = statuses.values.every(
+        (s) => s.isGranted || s.isLimited,
+      );
       permissionStatus = allGranted ? 'granted' : 'denied';
-      _addLog('Permission check: $permissionStatus');
+      _addLog('Permissions: $permissionStatus');
       return allGranted;
     } catch (e, st) {
       permissionStatus = 'error';
-      _addLog('Permission check error: $e');
+      _addLog('Permission error: $e');
       developer.log('Permission error', error: e, stackTrace: st);
       return false;
     }
   }
 
-  // -----------------------
-  // AD (advertising) helper: parse AD-TLV to extract local name (0x08/0x09)
-  // -----------------------
   String? _parseLocalNameFromAdBytes(Uint8List? advBytes) {
     if (advBytes == null || advBytes.isEmpty) return null;
 
@@ -135,52 +131,29 @@ class BleService extends ChangeNotifier {
     return null;
   }
 
-  /// Public helper for UI: return best known display name for a device
   String getDisplayName(String deviceId) {
     final nameFromMap = deviceLocalNames[deviceId];
     String bestName;
+
     if (nameFromMap != null && nameFromMap.isNotEmpty) {
       bestName = nameFromMap;
     } else {
       final adv = devices[deviceId];
       if (adv != null && adv.valid && (adv.name?.isNotEmpty ?? false)) {
-        bestName = adv.name ?? deviceId;
+        bestName = adv.name!;
       } else {
         final raw = _seenDevicesRaw[deviceId];
-        if (raw != null && raw.name.isNotEmpty)
-          bestName = raw.name;
-        else
-          bestName = deviceId;
+        bestName = (raw != null && raw.name.isNotEmpty) ? raw.name : deviceId;
       }
     }
 
-    // keep AdvSummary in-sync with bestName so UI reading `devices` gets it
-    try {
-      if (devices.containsKey(deviceId) &&
-          devices[deviceId]!.name != bestName) {
-        devices[deviceId]!.name = bestName;
-      }
-    } catch (_) {}
+    if (devices.containsKey(deviceId) && devices[deviceId]!.name != bestName) {
+      devices[deviceId]!.name = bestName;
+    }
 
     return bestName;
   }
 
-  // -----------------------
-  // Manufacturer blob parser (matches C++ layout)
-  // layout (21 bytes):
-  // 0-1: company id (LE)
-  // 2: proto ver
-  // 3: flags
-  // 4: battery
-  // 5: bpm
-  // 6: spo2
-  // 7-8: co2 (LE u16)
-  // 9-10: temp (LE int16, centi)
-  // 11-13: lat_e5 (LE int24)
-  // 14-16: lon_e5 (LE int24)
-  // 17-19: ts (LE 24-bit seconds)
-  // 20: crc8_maxim over bytes 0..19
-  // -----------------------
   AdvSummary _parseManufacturerData(
     Uint8List man,
     int rssi, {
@@ -196,15 +169,11 @@ class BleService extends ChangeNotifier {
       return adv;
     }
 
-    // CRC check
     final calc = _crc8Maxim(man.sublist(0, 20));
     final crcByte = man[20];
     if (calc != crcByte) {
       adv.valid = false;
       if (advName != null) adv.name = advName;
-      _addLog(
-        'Manufacturer CRC mismatch (got 0x${crcByte.toRadixString(16)}, calc 0x${calc.toRadixString(16)})',
-      );
       return adv;
     }
 
@@ -216,10 +185,7 @@ class BleService extends ChangeNotifier {
     }
 
     adv.valid = true;
-    final proto = man[2];
     final flags = man[3];
-
-    // decode flags into adv (this also sets adv.urgent & adv.gpsValid)
     adv.decodeFlags(flags);
 
     adv.batt = man[4] & 0xFF;
@@ -227,12 +193,10 @@ class BleService extends ChangeNotifier {
     adv.spo2 = man[6] & 0xFF;
     adv.co2 = (man[7] & 0xFF) | ((man[8] & 0xFF) << 8);
 
-    // temp centi signed LE -> int16
     final tempCenti = ((man[10] << 8) | (man[9] & 0xFF));
     final signedTemp = tempCenti.toSigned(16);
     adv.tempC = signedTemp / 100.0;
 
-    // parse 24-bit signed little-endian to int
     int readInt24LE(Uint8List arr, int idx) {
       int v =
           (arr[idx] & 0xFF) |
@@ -247,7 +211,6 @@ class BleService extends ChangeNotifier {
     adv.lat = lat_e5 / 1e5;
     adv.lon = lon_e5 / 1e5;
 
-    // 24-bit ts little-endian
     final ts =
         (man[17] & 0xFF) | ((man[18] & 0xFF) << 8) | ((man[19] & 0xFF) << 16);
     adv.ts = ts;
@@ -257,7 +220,6 @@ class BleService extends ChangeNotifier {
     return adv;
   }
 
-  // CRC8/MAXIM (same polynomial) used by server
   int _crc8Maxim(Uint8List data) {
     int crc = 0x00;
     for (int b in data) {
@@ -273,13 +235,10 @@ class BleService extends ChangeNotifier {
     return crc & 0xFF;
   }
 
-  // -----------------------
-  // SCANNING
-  // -----------------------
   Future<void> startScan({bool filterService = false}) async {
     final ok = await init();
     if (!ok) {
-      _addLog('startScan aborted: permissions not granted');
+      _addLog('Scan aborted: permissions denied');
       scanning = false;
       notifyListeners();
       throw Exception('Permissions not granted');
@@ -289,14 +248,14 @@ class BleService extends ChangeNotifier {
       try {
         await _scanSub!.cancel();
       } catch (e) {
-        _addLog('Error cancelling existing scan: $e');
+        _addLog('Error cancelling scan: $e');
       }
       _scanSub = null;
     }
 
     if (scanning) return;
     scanning = true;
-    _addLog('Scan started (filterService=${filterService ? "ON" : "OFF"})');
+    _addLog('▶ Scan started (filter=${filterService ? "ON" : "OFF"})');
     notifyListeners();
 
     _scanSub = _ble
@@ -308,84 +267,52 @@ class BleService extends ChangeNotifier {
           (d) {
             Uint8List? man;
             try {
-              if (d.manufacturerData.isNotEmpty)
+              if (d.manufacturerData.isNotEmpty) {
                 man = Uint8List.fromList(d.manufacturerData);
+              }
             } catch (_) {}
 
             _seenDevicesRaw[d.id] = d;
 
-            // Try pick a name from AD bytes if those are there in manufacturer or serviceData
             String? nameFromAdv = _parseLocalNameFromAdBytes(man);
-
-            // Some platforms may expose serviceData; try to search for a name there too
-            if (nameFromAdv == null) {
-              try {
-                final dynamic maybeServiceData = (d as dynamic).serviceData;
-                if (maybeServiceData is Map) {
-                  maybeServiceData.forEach((k, v) {
-                    if (nameFromAdv != null) return;
-                    try {
-                      final Uint8List bytes = v is Uint8List
-                          ? v
-                          : Uint8List.fromList(List<int>.from(v));
-                      nameFromAdv = _parseLocalNameFromAdBytes(bytes);
-                    } catch (_) {}
-                  });
-                }
-              } catch (_) {}
-            }
-
             final nameFromDeviceProp = (d.name.isNotEmpty ? d.name : null);
             final chosenName = nameFromAdv ?? nameFromDeviceProp;
+
             if (chosenName != null && chosenName.isNotEmpty) {
               deviceLocalNames[d.id] = chosenName;
             }
 
-            // Parse manufacturer blob if present
             if (man != null && man.length >= 21) {
               final parsed = _parseManufacturerData(
                 man,
                 d.rssi,
                 advName: chosenName,
               );
-              parsed.rssi = d.rssi;
-              parsed.lastSeen = DateTime.now();
-              if (chosenName != null && chosenName.isNotEmpty)
-                parsed.name = chosenName;
               devices[d.id] = parsed;
             } else {
-              // ensure minimal entry so UI can show device card
               devices.putIfAbsent(d.id, () => AdvSummary());
               final advEntry = devices[d.id]!;
               advEntry.rssi = d.rssi;
               advEntry.lastSeen = DateTime.now();
-              if (chosenName != null && chosenName.isNotEmpty)
-                advEntry.name = chosenName;
+              if (chosenName != null) advEntry.name = chosenName;
             }
 
-            // Ensure deviceLocalNames and devices[name] are in sync
             if (chosenName != null && chosenName.isNotEmpty) {
-              try {
-                deviceLocalNames[d.id] = chosenName;
-                if (devices.containsKey(d.id)) devices[d.id]!.name = chosenName;
-              } catch (_) {}
+              deviceLocalNames[d.id] = chosenName;
+              if (devices.containsKey(d.id)) devices[d.id]!.name = chosenName;
             }
 
-            _addLog(
-              'Discovered: ${chosenName ?? (d.name.isNotEmpty ? d.name : "<no-name>")} (${d.id}) RSSI=${d.rssi}',
-            );
             notifyListeners();
 
-            // Auto connect for urgent devices if manufacturer included urgent bit
             final advSummary = devices[d.id];
             if (advSummary != null && advSummary.urgent) {
-              _addLog('Auto-connect candidate (urgent): ${d.id}');
+              _addLog('🚨 Urgent device detected: ${d.id}');
               _tryAutoConnect(d.id);
             }
           },
           onError: (err) {
             scanning = false;
-            _addLog('Scan error: $err');
+            _addLog('❌ Scan error: $err');
             notifyListeners();
           },
         );
@@ -395,135 +322,171 @@ class BleService extends ChangeNotifier {
     if (_scanSub != null) {
       try {
         await _scanSub!.cancel();
-        _addLog('Scan subscription cancelled');
       } catch (e) {
-        _addLog('Error cancelling scan subscription: $e');
+        _addLog('Error stopping scan: $e');
       }
       _scanSub = null;
     }
     if (!scanning) return;
     scanning = false;
-    _addLog('Scan stopped');
+    _addLog('⏸ Scan stopped');
     notifyListeners();
   }
 
-  // -----------------------
-  // CONNECT / AUTO-CONNECT
-  // -----------------------
+  // FIXED: Improved connection flow with proper timing
   Future<void> manualConnect(String deviceId) async {
-    _addLog('Manual connect requested: $deviceId');
+    _addLog('========================================');
+    _addLog('🔗 Manual connect to: ${getDisplayName(deviceId)}');
+    _addLog('========================================');
     await stopScan();
     _cleanupConnection();
 
     try {
+      connectionTime = DateTime.now();
       _connSub = _ble
           .connectToDevice(
             id: deviceId,
-            connectionTimeout: const Duration(seconds: 10),
+            connectionTimeout: const Duration(seconds: 20),
           )
           .listen(
             (update) async {
+              _addLog('Connection state: ${update.connectionState}');
+
               switch (update.connectionState) {
+                case DeviceConnectionState.connecting:
+                  _addLog('⏳ Connecting...');
+                  break;
+
                 case DeviceConnectionState.connected:
-                  _addLog('Connected: $deviceId');
+                  _addLog('✅ CONNECTED!');
                   connectedId = deviceId;
                   authorized = false;
+                  isSubscribed = false;
                   notifyListeners();
+
+                  // FIXED: Proper sequencing with delays
+                  _addLog('⏳ Waiting 800ms before discovery...');
+                  await Future.delayed(const Duration(milliseconds: 800));
+
+                  _addLog('🔍 Starting service discovery...');
                   await _discoverAndLog(deviceId);
+
+                  _addLog('⏳ Waiting 500ms before auth...');
+                  await Future.delayed(const Duration(milliseconds: 500));
+
+                  _addLog('🔐 Starting auth & subscribe...');
                   await _authorizeAndSubscribe(deviceId);
+
+                  _addLog('========================================');
+                  _addLog('✅ Connection sequence complete!');
+                  _addLog('Subscribed: $isSubscribed');
+                  _addLog('========================================');
                   break;
+
                 case DeviceConnectionState.disconnecting:
-                  _addLog('Disconnecting: $deviceId');
+                  _addLog('⏳ Disconnecting...');
                   break;
+
                 case DeviceConnectionState.disconnected:
-                  _addLog('Disconnected: $deviceId');
+                  _addLog('❌ Disconnected');
                   if (connectedId == deviceId) _cleanupConnection();
-                  break;
-                case DeviceConnectionState.connecting:
-                  _addLog('Connecting: $deviceId');
                   break;
               }
             },
             onError: (err) {
-              _addLog('Connection error: $err');
+              _addLog('❌ Connection error: $err');
               _cleanupConnection();
             },
           );
-    } catch (e) {
-      _addLog('manualConnect exception: $e');
+    } catch (e, st) {
+      _addLog('❌ Connect exception: $e');
+      developer.log('Connect error', error: e, stackTrace: st);
       _cleanupConnection();
     }
   }
 
   Future<void> _tryAutoConnect(String deviceId) async {
     if (connectedId != null) return;
+
     final now = DateTime.now();
     if (lastConnectAttempt != null &&
         now.difference(lastConnectAttempt!) < connectBackoff) {
-      _addLog('Auto-connect backoff: ${deviceId}');
+      _addLog('⏳ Auto-connect backoff');
       return;
     }
     lastConnectAttempt = now;
 
-    _addLog('Attempting auto-connect: $deviceId');
+    _addLog('🔗 Auto-connecting...');
 
     try {
+      connectionTime = DateTime.now();
       _connSub = _ble
           .connectToDevice(
             id: deviceId,
-            connectionTimeout: const Duration(seconds: 8),
+            connectionTimeout: const Duration(seconds: 15),
           )
           .listen(
             (update) async {
               switch (update.connectionState) {
                 case DeviceConnectionState.connected:
-                  _addLog('Auto-connected: $deviceId');
+                  _addLog('✅ Auto-connected');
                   connectedId = deviceId;
                   authorized = false;
+                  isSubscribed = false;
                   notifyListeners();
+                  await Future.delayed(const Duration(milliseconds: 800));
                   await _discoverAndLog(deviceId);
+                  await Future.delayed(const Duration(milliseconds: 500));
                   await _authorizeAndSubscribe(deviceId);
                   break;
+
                 case DeviceConnectionState.disconnected:
-                  _addLog('Auto-connect disconnected: $deviceId');
+                  _addLog('❌ Auto-connect disconnected');
                   if (connectedId == deviceId) _cleanupConnection();
                   break;
+
                 default:
                   break;
               }
             },
             onError: (err) {
-              _addLog('Auto-connect error: $err');
+              _addLog('❌ Auto-connect error: $err');
               _cleanupConnection();
             },
           );
     } catch (e) {
-      _addLog('Auto-connect exception: $e');
+      _addLog('❌ Auto-connect exception: $e');
       _cleanupConnection();
     }
   }
 
-  // -----------------------
-  // SERVICE DISCOVERY + READ DEVICE NAME
-  // -----------------------
+  // FIXED: Better service discovery
   Future<void> _discoverAndLog(String deviceId) async {
-    _addLog('Discovering services for $deviceId ...');
+    _addLog('🔍 Discovering services...');
     try {
       final services = await _ble.discoverServices(deviceId);
-      _addLog('Discovered ${services.length} services for $deviceId');
+      _discoveredServices.clear();
+      _discoveredServices.addAll(services);
+      _addLog('📋 Found ${services.length} services');
+
       for (final s in services) {
-        _addLog(' Service: ${s.serviceId.toString()}');
+        _addLog('  📦 Service: ${s.serviceId}');
         for (final c in s.characteristics) {
           final props = <String>[];
-          if (c.isReadable) props.add('READ');
-          if (c.isWritableWithResponse) props.add('WRITE');
-          if (c.isWritableWithoutResponse) props.add('WRITE_NO_RESP');
-          if (c.isNotifiable) props.add('NOTIFY');
-          if (c.isIndicatable) props.add('INDICATE');
+          if (c.isReadable) props.add('R');
+          if (c.isWritableWithResponse) props.add('W');
+          if (c.isWritableWithoutResponse) props.add('Wn');
+          if (c.isNotifiable) props.add('N');
+          if (c.isIndicatable) props.add('I');
 
-          _addLog('  Char: ${c.characteristicId} props=${props.join(',')}');
+          _addLog('    📝 Char: ${c.characteristicId} [${props.join(',')}]');
 
-          if (c.isReadable) {
+          // Read Device Name if available
+          if (s.serviceId.toString().toLowerCase() ==
+                  gapService.toString().toLowerCase() &&
+              c.characteristicId.toString().toLowerCase() ==
+                  deviceNameChar.toString().toLowerCase() &&
+              c.isReadable) {
             try {
               final val = await _ble.readCharacteristic(
                 QualifiedCharacteristic(
@@ -532,44 +495,33 @@ class BleService extends ChangeNotifier {
                   deviceId: deviceId,
                 ),
               );
-              final hex = _hex(val);
-              String text = '';
-              try {
-                text = utf8.decode(val);
-              } catch (_) {}
-              _addLog('   Read: $hex ${text.isNotEmpty ? '("$text")' : ''}');
-
-              // If Device Name characteristic, store it
-              if (s.serviceId.toString().toLowerCase() ==
-                      gapService.toString().toLowerCase() &&
-                  c.characteristicId.toString().toLowerCase() ==
-                      deviceNameChar.toString().toLowerCase()) {
-                final name = text.trim();
-                if (name.isNotEmpty) {
-                  deviceLocalNames[deviceId] = name;
-                  if (devices.containsKey(deviceId))
-                    devices[deviceId]!.name = name;
-                  _addLog('   GATT Device Name read: $name');
-                  notifyListeners();
-                }
+              final name = utf8.decode(val).trim();
+              if (name.isNotEmpty) {
+                deviceLocalNames[deviceId] = name;
+                if (devices.containsKey(deviceId))
+                  devices[deviceId]!.name = name;
+                _addLog('      📛 Device Name: "$name"');
+                notifyListeners();
               }
             } catch (e) {
-              _addLog('   Read failed: $e');
+              _addLog('      ⚠️ Read Device Name failed: $e');
             }
           }
         }
       }
-    } catch (e) {
-      _addLog('Service discovery failed: $e');
+
+      _addLog('✅ Service discovery complete');
+    } catch (e, st) {
+      _addLog('❌ Service discovery failed: $e');
+      developer.log('Discovery error', error: e, stackTrace: st);
     }
     notifyListeners();
   }
 
-  // -----------------------
-  // AUTH + SUBSCRIBE
-  // -----------------------
+  // FIXED: Improved auth and subscription
   Future<void> _authorizeAndSubscribe(String deviceId) async {
     try {
+      // Write auth token (even though it's disabled on ESP32, good practice)
       final token = ByteData(4)..setUint32(0, APP_AUTH_TOKEN, Endian.little);
       final ctrlChar = QualifiedCharacteristic(
         serviceId: serviceUuid,
@@ -577,136 +529,154 @@ class BleService extends ChangeNotifier {
         deviceId: deviceId,
       );
 
-      _addLog('Writing auth token to control char...');
-      await _ble.writeCharacteristicWithResponse(
-        ctrlChar,
-        value: token.buffer.asUint8List(),
-      );
-
-      // Try read back ack
+      _addLog('🔑 Writing auth token...');
       try {
+        await _ble.writeCharacteristicWithResponse(
+          ctrlChar,
+          value: token.buffer.asUint8List(),
+        );
+        _addLog('✅ Auth token written');
+      } catch (e) {
+        _addLog('⚠️ Auth write failed (may be OK): $e');
+      }
+
+      // Try read ACK
+      try {
+        await Future.delayed(const Duration(milliseconds: 300));
         final ack = await _ble.readCharacteristic(ctrlChar);
         final ackStr = String.fromCharCodes(ack);
-        _addLog(
-          'Control read: ${_hex(ack)} ${ackStr.isNotEmpty ? ackStr : ''}',
-        );
-        if (ackStr == 'OK') {
-          authorized = true;
-          _addLog('Authorized via OK');
-        } else {
-          // some servers may not reply OK; treat write success as authorized
-          authorized = true;
-        }
+        _addLog('📥 Control ACK: "$ackStr"');
+        authorized = (ackStr == 'OK');
       } catch (e) {
-        _addLog('Control read failed (assuming write success): $e');
+        _addLog('⚠️ No ACK read (assuming authorized): $e');
         authorized = true;
       }
 
+      // FIXED: Subscribe to stream characteristic
       final streamChar = QualifiedCharacteristic(
         serviceId: serviceUuid,
         characteristicId: streamUuid,
         deviceId: deviceId,
       );
 
-      _addLog('Subscribing to stream char...');
+      _addLog('========================================');
+      _addLog('📡 Subscribing to telemetry stream...');
+      _addLog('Service: ${serviceUuid.toString()}');
+      _addLog('Char: ${streamUuid.toString()}');
+      _addLog('========================================');
+
+      // Cancel any existing subscription
+      if (_notifySub != null) {
+        await _notifySub!.cancel();
+        _notifySub = null;
+      }
+
+      // Subscribe with better error handling
       _notifySub = _ble
           .subscribeToCharacteristic(streamChar)
           .listen(
             (data) {
+              _addLog('📦 Received ${data.length} bytes');
               _handleStreamPacket(data);
             },
             onError: (err) {
-              _addLog('Stream subscription error: $err');
-              _cleanupConnection();
+              _addLog('❌ Stream error: $err');
+              isSubscribed = false;
+              notifyListeners();
+            },
+            onDone: () {
+              _addLog('⚠️ Stream subscription closed');
+              isSubscribed = false;
+              notifyListeners();
             },
           );
 
+      isSubscribed = true;
+      _addLog('========================================');
+      _addLog('✅✅✅ SUBSCRIBED TO TELEMETRY STREAM!');
+      _addLog('========================================');
       notifyListeners();
     } catch (e, st) {
-      _addLog('Authorize/subscribe failed: $e');
-      developer.log('authorize error', error: e, stackTrace: st);
+      _addLog('========================================');
+      _addLog('❌❌❌ Auth/subscribe FAILED: $e');
+      _addLog('========================================');
+      developer.log('Auth error', error: e, stackTrace: st);
       authorized = false;
-      _cleanupConnection();
+      isSubscribed = false;
       notifyListeners();
     }
   }
 
-  // -----------------------
-  // PACKET HANDLER
-  // -----------------------
+  // FIXED: Better packet handler
   void _handleStreamPacket(List<int> raw) async {
     try {
       if (raw.length < 15) {
-        _addLog('Stream packet too small: ${raw.length}');
-        return;
-      }
-      if (raw[0] != 0xA1 || raw[1] != 0xB2) {
-        _addLog('Stream packet header mismatch: ${_hex(raw.sublist(0, 2))}');
+        _addLog('⚠️ Packet too small: ${raw.length} bytes');
         return;
       }
 
-      final pktType = raw[2];
+      if (raw[0] != 0xA1 || raw[1] != 0xB2) {
+        _addLog('⚠️ Bad header: ${_hex(raw.sublist(0, 2))}');
+        return;
+      }
+
       final seq = raw[3];
-      // ts = bytes 4..9 (6 bytes)
       final bpm = raw[10];
       final spo2 = raw[11];
       final co2 = raw[12] | (raw[13] << 8);
       final flags = raw[14];
 
+      // Check for missed packets
       if (lastSeq != -1 && ((lastSeq + 1) & 0xFF) != seq) {
         missedPackets++;
         _addLog(
-          'Packet gap detected: expected ${(lastSeq + 1) & 0xFF} got $seq (missed total $missedPackets)',
+          '⚠️ Gap: expected ${(lastSeq + 1) & 0xFF}, got $seq (total missed: $missedPackets)',
         );
       }
+
       lastSeq = seq;
       lastPacketTime = DateTime.now();
+      totalPacketsReceived++;
 
       _addLog(
-        'Telemetry pkt seq=$seq bpm=$bpm spo2=$spo2 co2=$co2 flags=0x${flags.toRadixString(16)}',
+        '📊 Pkt#$seq: BPM=$bpm SpO2=$spo2 CO2=$co2 flags=0x${flags.toRadixString(16).padLeft(2, '0')}',
       );
 
-      // ACK back on control char: "ACK" + seq
+      // Send ACK
       if (connectedId != null) {
         final ackChar = QualifiedCharacteristic(
           serviceId: serviceUuid,
           characteristicId: controlUuid,
           deviceId: connectedId!,
         );
-        final Uint8List ack = Uint8List.fromList([
-          0x41,
-          0x43,
-          0x4B,
-          seq,
-        ]); // 'A' 'C' 'K' seq
+        final ack = Uint8List.fromList([0x41, 0x43, 0x4B, seq]); // 'ACK' + seq
         try {
           await _ble.writeCharacteristicWithoutResponse(ackChar, value: ack);
-          _addLog('Sent ACK seq=$seq');
         } catch (e) {
-          _addLog('Failed to send ACK: $e');
+          _addLog('⚠️ ACK send failed: $e');
         }
       }
 
+      // Update device data
       if (connectedId != null && devices.containsKey(connectedId)) {
-        final cur = devices[connectedId]!;
-        cur.bpm = bpm;
-        cur.spo2 = spo2;
-        cur.co2 = co2;
-        // decode flags into adv entry as well (keeps UI consistent)
-        cur.decodeFlags(flags);
-        cur.lastSeen = DateTime.now();
-        cur.rssi = _seenDevicesRaw[connectedId]?.rssi ?? cur.rssi;
-        devices[connectedId!] = cur;
+        devices[connectedId]!.updateFromTelemetry(
+          seq: seq,
+          bpm: bpm,
+          spo2: spo2,
+          co2: co2,
+          flags: flags,
+        );
         notifyListeners();
       }
-    } catch (e) {
-      _addLog('handleStreamPacket exception: $e');
+    } catch (e, st) {
+      _addLog('❌ Packet handler error: $e');
+      developer.log('Packet error', error: e, stackTrace: st);
     }
   }
 
-  // expose a public helper to read device name over GATT on demand
   Future<void> readGattDeviceName(String deviceId) async {
     try {
+      _addLog('📛 Reading device name...');
       final char = QualifiedCharacteristic(
         serviceId: gapService,
         characteristicId: deviceNameChar,
@@ -717,11 +687,11 @@ class BleService extends ChangeNotifier {
       if (name.isNotEmpty) {
         deviceLocalNames[deviceId] = name;
         if (devices.containsKey(deviceId)) devices[deviceId]!.name = name;
-        _addLog('GATT read Device Name: $name');
+        _addLog('✅ Device Name: "$name"');
         notifyListeners();
       }
     } catch (e) {
-      _addLog('readGattDeviceName failed: $e');
+      _addLog('❌ Read Device Name failed: $e');
     }
   }
 
@@ -729,32 +699,42 @@ class BleService extends ChangeNotifier {
     await _discoverAndLog(deviceId);
   }
 
-  // -----------------------
-  // CLEANUP
-  // -----------------------
   void _cleanupConnection() {
     _notifySub?.cancel();
     _notifySub = null;
     _connSub?.cancel();
     _connSub = null;
-    _addLog('Connection cleaned up');
     connectedId = null;
     authorized = false;
+    isSubscribed = false;
     lastSeq = -1;
     missedPackets = 0;
+    totalPacketsReceived = 0;
+    connectionTime = null;
+    _discoveredServices.clear();
+    _addLog('🧹 Connection cleaned up');
     notifyListeners();
   }
 
   Future<void> disconnect() async {
-    _addLog('Disconnect requested');
+    _addLog('🔌 Disconnect requested');
     _cleanupConnection();
     await stopScan();
   }
 
   String get status {
     if (connectedId == null) return scanning ? "Scanning..." : "Idle";
-    if (!authorized) return "Connected (authenticating)";
-    return "Connected (authorized)";
+    if (!authorized) return "Connected (auth...)";
+    if (!isSubscribed) return "Connected (subscribing...)";
+    return "Connected & Streaming";
+  }
+
+  String get connectionDuration {
+    if (connectionTime == null) return "—";
+    final duration = DateTime.now().difference(connectionTime!);
+    final mins = duration.inMinutes;
+    final secs = duration.inSeconds % 60;
+    return "${mins}m ${secs}s";
   }
 
   String _hex(List<int> data) {

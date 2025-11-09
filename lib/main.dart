@@ -6,6 +6,8 @@ import 'package:resqnet_ble/screens/scan_screen.dart';
 import 'package:resqnet_ble/screens/detail_screen.dart';
 import 'package:resqnet_ble/screens/map_screen.dart';
 import 'package:resqnet_ble/screens/alerts_screen.dart';
+import 'package:resqnet_ble/screens/debug_logs_screen.dart';
+import 'package:resqnet_ble/screens/telemetry_screen.dart';
 import 'package:resqnet_ble/screens/settings_screen.dart';
 
 void main() {
@@ -33,6 +35,8 @@ class ResQNetApp extends StatelessWidget {
           '/detail': (ctx) => const DetailScreen(),
           '/map': (ctx) => const MapScreen(),
           '/alerts': (ctx) => const AlertsScreen(),
+          '/telemetry': (context) => const TelemetryScreen(),
+          '/debug': (context) => const DebugLogsScreen(),
           '/settings': (ctx) => const SettingsScreen(),
         },
       ),
