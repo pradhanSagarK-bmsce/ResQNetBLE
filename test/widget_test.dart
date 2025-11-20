@@ -13,7 +13,7 @@ import 'package:resqnet_ble/main.dart';
 /// Minimal app used for the widget test so `MyApp` exists and provides
 /// a counter and a '+' floating action button that the test can interact with.
 class MyApp extends StatefulWidget {
-  const MyApp({Key? key}) : super(key: key);
+  const MyApp({super.key});
 
   @override
   State<MyApp> createState() => _MyAppState();
