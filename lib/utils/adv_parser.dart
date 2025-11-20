@@ -27,12 +27,12 @@ AdvSummary parseManufacturerData(Uint8List data, int rssi) {
     int tempRaw = (data[9] | (data[10] << 8));
     if (tempRaw & 0x8000 != 0) tempRaw = tempRaw - 0x10000;
     out.tempC = tempRaw / 100.0;
-    int latE5 = (data[11] | (data[12] << 8) | (data[13] << 16));
-    if ((latE5 & 0x800000) != 0) latE5 = latE5 - 0x1000000;
-    out.lat = latE5 / 1e5;
-    int lonE5 = (data[14] | (data[15] << 8) | (data[16] << 16));
-    if ((lonE5 & 0x800000) != 0) lonE5 = lonE5 - 0x1000000;
-    out.lon = lonE5 / 1e5;
+    int lat_e5 = (data[11] | (data[12] << 8) | (data[13] << 16));
+    if ((lat_e5 & 0x800000) != 0) lat_e5 = lat_e5 - 0x1000000;
+    out.lat = lat_e5 / 1e5;
+    int lon_e5 = (data[14] | (data[15] << 8) | (data[16] << 16));
+    if ((lon_e5 & 0x800000) != 0) lon_e5 = lon_e5 - 0x1000000;
+    out.lon = lon_e5 / 1e5;
     out.ts = data[17] | (data[18] << 8) | (data[19] << 16);
     out.valid = true;
     out.rssi = rssi;

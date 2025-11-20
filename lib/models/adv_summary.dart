@@ -144,7 +144,7 @@ class AdvSummary {
 
   String get shortName {
     if (name == null) return '<unk>';
-    return name!.length > 12 ? '${name!.substring(0, 12)}…' : name!;
+    return name!.length > 12 ? name!.substring(0, 12) + '…' : name!;
   }
 
   /// Small map representation useful for debug printing or UI JSON view

@@ -1,5 +1,5 @@
 // lib/screens/debug_logs_screen.dart
-// Real-time debug logs screen to monitor BLE Mesh process
+// Real-time debug logs screen to monitor BLE connection process
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -50,7 +50,7 @@ class _DebugLogsScreenState extends State<DebugLogsScreen> {
       backgroundColor: const Color(0xFF0A0A0A),
       appBar: AppBar(
         backgroundColor: Colors.black,
-        title: const Text('🔍 Mesh Logs'),
+        title: const Text('🔍 Debug Logs'),
         actions: [
           IconButton(
             icon: Icon(
@@ -103,39 +103,27 @@ class _DebugLogsScreenState extends State<DebugLogsScreen> {
   }
 
   Widget _buildStatusBar(BleService ble) {
-    // Determine high-level status string
-    String systemStatus = "Idle";
-    Color statusColor = Colors.grey;
-    
-    if (ble.isSourceMode) {
-      systemStatus = "Source (Bed)";
-      statusColor = Colors.redAccent;
-    } else if (ble.isGatewayMode) {
-      systemStatus = "Gateway (Cloud)";
-      statusColor = Colors.blueAccent;
-    } else if (ble.scanning) {
-      systemStatus = "Relay (Active)";
-      statusColor = Colors.greenAccent;
-    }
-
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: const Color(0xFF151515),
-        border: const Border(bottom: BorderSide(color: Colors.white10)),
+        border: Border(bottom: BorderSide(color: Colors.white10)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Row 1: Main Status & Log Count
           Row(
             children: [
               Expanded(
                 child: _statusCard(
-                  'Role Mode',
-                  systemStatus,
-                  statusColor,
-                  Icons.layers,
+                  'Status',
+                  ble.status,
+                  ble.connectedId != null && ble.isSubscribed
+                      ? Colors.green
+                      : ble.connectedId != null
+                      ? Colors.orange
+                      : Colors.grey,
+                  Icons.info_outline,
                 ),
               ),
               const SizedBox(width: 8),
@@ -150,28 +138,51 @@ class _DebugLogsScreenState extends State<DebugLogsScreen> {
             ],
           ),
           const SizedBox(height: 8),
-          // Row 2: Hardware Activity
           Row(
             children: [
               Expanded(
                 child: _statusCard(
-                  'Scanner',
-                  ble.scanning ? 'ON' : 'OFF',
-                  ble.scanning ? Colors.green : Colors.red,
-                  Icons.radar,
+                  'Connected',
+                  ble.connectedId != null ? '✅ Yes' : '❌ No',
+                  ble.connectedId != null ? Colors.green : Colors.red,
+                  Icons.cable,
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
                 child: _statusCard(
-                  'Advertiser',
-                  ble.advertising ? 'Broadcasting' : 'Silent',
-                  ble.advertising ? Colors.orange : Colors.grey,
-                  Icons.podcasts,
+                  'Subscribed',
+                  ble.isSubscribed ? '✅ Yes' : '❌ No',
+                  ble.isSubscribed ? Colors.green : Colors.red,
+                  Icons.notifications_active,
                 ),
               ),
             ],
           ),
+          if (ble.connectedId != null) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: _statusCard(
+                    'Packets',
+                    '${ble.totalPacketsReceived}',
+                    Colors.purple,
+                    Icons.data_usage,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _statusCard(
+                    'Missed',
+                    '${ble.missedPackets}',
+                    ble.missedPackets > 0 ? Colors.orange : Colors.green,
+                    Icons.warning_amber,
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -195,7 +206,7 @@ class _DebugLogsScreenState extends State<DebugLogsScreen> {
               children: [
                 Text(
                   label,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 10,
                     color: Colors.white60,
                     fontWeight: FontWeight.w500,
@@ -224,7 +235,7 @@ class _DebugLogsScreenState extends State<DebugLogsScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.article_outlined, size: 64, color: Colors.white24),
+          Icon(Icons.article_outlined, size: 64, color: Colors.white24),
           const SizedBox(height: 16),
           const Text(
             'No logs yet',
@@ -236,7 +247,7 @@ class _DebugLogsScreenState extends State<DebugLogsScreen> {
           ),
           const SizedBox(height: 8),
           const Text(
-            'Start the Mesh Network to see activity',
+            'Start scanning or connecting to see logs',
             style: TextStyle(fontSize: 14, color: Colors.white38),
           ),
         ],
@@ -257,7 +268,7 @@ class _DebugLogsScreenState extends State<DebugLogsScreen> {
   }
 
   Widget _buildLogEntry(String log, int index) {
-    // Parse log entry colors based on keywords
+    // Parse log entry
     Color backgroundColor = const Color(0xFF0F0F0F);
     Color textColor = Colors.white70;
     IconData? icon;
@@ -277,36 +288,33 @@ class _DebugLogsScreenState extends State<DebugLogsScreen> {
       textColor = Colors.redAccent;
       icon = Icons.error;
       iconColor = Colors.redAccent;
-    } else if (log.contains('🚨') || log.contains('CRITICAL')) {
-      // Critical Alert (Earthquake etc)
-      backgroundColor = Colors.redAccent.withOpacity(0.2);
-      textColor = Colors.red;
-      icon = Icons.warning_amber_rounded;
-      iconColor = Colors.red;
-    } else if (log.contains('📢') || log.contains('Broadcasting')) {
-      // Broadcasting/Advertising
+    } else if (log.contains('⚠️') || log.contains('WARNING')) {
       backgroundColor = Colors.orange.withOpacity(0.1);
       textColor = Colors.orangeAccent;
-      icon = Icons.campaign;
+      icon = Icons.warning;
       iconColor = Colors.orangeAccent;
-    } else if (log.contains('📥') || log.contains('RECV')) {
-      // Received Packet
+    } else if (log.contains('🔗') || log.contains('CONNECT')) {
       backgroundColor = Colors.blue.withOpacity(0.1);
       textColor = Colors.blueAccent;
-      icon = Icons.call_received;
+      icon = Icons.cable;
       iconColor = Colors.blueAccent;
-    } else if (log.contains('⤴️') || log.contains('HOPPING')) {
-      // Relaying/Hopping
+    } else if (log.contains('📡') ||
+        log.contains('📦') ||
+        log.contains('SUBSCRIB')) {
       backgroundColor = Colors.purple.withOpacity(0.1);
       textColor = Colors.purpleAccent;
-      icon = Icons.share;
+      icon = Icons.wifi;
       iconColor = Colors.purpleAccent;
-    } else if (log.contains('☁️') || log.contains('CLOUD')) {
-      // Gateway Upload
+    } else if (log.contains('🔍') || log.contains('DISCOVER')) {
       backgroundColor = Colors.cyan.withOpacity(0.1);
       textColor = Colors.cyanAccent;
-      icon = Icons.cloud_upload;
+      icon = Icons.search;
       iconColor = Colors.cyanAccent;
+    } else if (log.contains('╔') || log.contains('═')) {
+      backgroundColor = Colors.indigo.withOpacity(0.1);
+      textColor = Colors.white;
+      icon = Icons.info;
+      iconColor = Colors.indigoAccent;
     }
 
     return Container(
