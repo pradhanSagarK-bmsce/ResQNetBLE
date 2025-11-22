@@ -133,44 +133,6 @@ class _TelemetryScreenState extends State<TelemetryScreen>
             ),
           ],
         ),
-        actions: [
-          if (isLive)
-            Padding(
-              padding: const EdgeInsets.all(8.0),
-              child: Center(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.green.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.greenAccent),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        Icons.check_circle,
-                        color: Colors.greenAccent,
-                        size: 16,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        '${ble.totalPacketsReceived} pkts',
-                        style: const TextStyle(
-                          color: Colors.greenAccent,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-        ],
       ),
       body: !isLive
           ? _buildNotConnected(context)
@@ -479,21 +441,6 @@ class _TelemetryScreenState extends State<TelemetryScreen>
           const SizedBox(height: 12),
           _statusRow('Duration', ble.connectionDuration, Icons.timer),
           _statusRow(
-            'Total Packets',
-            '${ble.totalPacketsReceived}',
-            Icons.data_usage,
-          ),
-          _statusRow(
-            'Missed Packets',
-            '${ble.missedPackets}',
-            Icons.warning_amber,
-          ),
-          _statusRow(
-            'Last Packet',
-            _timeSince(ble.lastPacketTime),
-            Icons.access_time,
-          ),
-          _statusRow(
             'Signal (RSSI)',
             '${adv.rssi} dBm',
             Icons.signal_cellular_4_bar,
@@ -598,7 +545,7 @@ class _TelemetryScreenState extends State<TelemetryScreen>
   }
 
   String _timeSince(DateTime? time) {
-    if (time == null) return '—';
+    if (time == null) return '–';
     final diff = DateTime.now().difference(time);
     if (diff.inSeconds < 60) return '${diff.inSeconds}s ago';
     if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';

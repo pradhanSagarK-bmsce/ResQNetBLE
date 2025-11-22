@@ -37,6 +37,7 @@ class AdvSummary {
   bool shock = false;
   bool fall = false;
   bool tilt = false;
+  bool smokeOrFire = false;
 
   // Extended telemetry (from GATT streaming packets)
   // Accelerometer (m/s^2 or server units — keep as double)
@@ -67,22 +68,20 @@ class AdvSummary {
   /// bit1 = vibration
   /// bit2 = tilt
   /// bit3 = urgent / fall
-  /// bit5 = abnormalVitals proxy (server may set this)
+  /// bit5 = urgent - abnormalVitals
   /// bit6 = gpsOK
+  /// bit7: Smoke/Fire
   void decodeFlags(int flags) {
     flagsRaw = flags & 0xFF;
+
     freefall = (flags & (1 << 0)) != 0;
     vibration = (flags & (1 << 1)) != 0;
     tilt = (flags & (1 << 2)) != 0;
-    // server uses bit3 to indicate urgent/fall
     fall = (flags & (1 << 3)) != 0;
-    // bit4 not used by server typically — keep shock mapping if you want
     shock = (flags & (1 << 4)) != 0;
-    // bit5 used as abnormalVitals proxy on some server builds
-    // we don't map it to a dedicated field, but it's available in flagsRaw
+    urgent = (flags & (1 << 5)) != 0;
     gpsValid = (flags & (1 << 6)) != 0;
-    // urgent = fall OR other server logic; server sets bit3 for urgent/fall
-    urgent = (flags & (1 << 3)) != 0;
+    smokeOrFire = (flags & (1 << 7)) != 0;
   }
 
   /// Update the AdvSummary with telemetry fields received from a streaming packet.
@@ -182,6 +181,7 @@ class AdvSummary {
       'shock': shock,
       'fall': fall,
       'tilt': tilt,
+      'smokeOrFire': smokeOrFire,
     };
   }
 
@@ -227,6 +227,7 @@ class AdvSummary {
       a.shock = m['shock'] as bool? ?? a.shock;
       a.fall = m['fall'] as bool? ?? a.fall;
       a.tilt = m['tilt'] as bool? ?? a.tilt;
+      a.smokeOrFire = m['smokeOrFire'] as bool? ?? a.smokeOrFire;
     } catch (_) {
       // ignore malformed map
     }
@@ -235,6 +236,6 @@ class AdvSummary {
 
   @override
   String toString() {
-    return 'AdvSummary(name=$name valid=$valid urgent=$urgent gpsValid=$gpsValid flagsRaw=0x${flagsRaw.toRadixString(16)} batt=$batt bpm=$bpm spo2=$spo2 co2=$co2 tempC=$tempC lat=$lat lon=$lon ts=$ts rssi=$rssi lastSeen=$lastSeen freefall=$freefall vibration=$vibration shock=$shock fall=$fall tilt=$tilt acc=($accX,$accY,$accZ) gyr=($gyrX,$gyrY,$gyrZ) pressure=$pressure humidity=$humidity speed=$speed altitude=$altitude streamSeq=$streamSeq lastTelemetryTime=$lastTelemetryTime)';
+    return 'AdvSummary(name=$name valid=$valid urgent=$urgent gpsValid=$gpsValid flagsRaw=0x${flagsRaw.toRadixString(16)} batt=$batt bpm=$bpm spo2=$spo2 co2=$co2 tempC=$tempC lat=$lat lon=$lon ts=$ts rssi=$rssi lastSeen=$lastSeen freefall=$freefall vibration=$vibration shock=$shock fall=$fall tilt=$tilt smokeOrFire=$smokeOrFire acc=($accX,$accY,$accZ) gyr=($gyrX,$gyrY,$gyrZ) pressure=$pressure humidity=$humidity speed=$speed altitude=$altitude streamSeq=$streamSeq lastTelemetryTime=$lastTelemetryTime)';
   }
 }

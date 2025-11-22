@@ -15,19 +15,42 @@ class DeviceCard extends StatelessWidget {
     return Colors.tealAccent;
   }
 
+  bool _looksLikeMacAddress(String? value) {
+    if (value == null || value.isEmpty) return false;
+    // Check for common MAC address patterns:
+    // XX:XX:XX:XX:XX:XX or XX-XX-XX-XX-XX-XX or XXXXXXXXXXXX
+    final macPattern1 = RegExp(r'^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$');
+    final macPattern2 = RegExp(r'^[0-9A-Fa-f]{12}$');
+    // Also check for UUID-like patterns (common on iOS)
+    final uuidPattern = RegExp(
+      r'^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$',
+    );
+    return macPattern1.hasMatch(value) ||
+        macPattern2.hasMatch(value) ||
+        uuidPattern.hasMatch(value);
+  }
+
+  String _getDisplayName() {
+    // Check if name is available and valid
+    if (summary.name != null &&
+        summary.name!.isNotEmpty &&
+        summary.name!.toLowerCase() != 'null' &&
+        !_looksLikeMacAddress(summary.name)) {
+      return summary.name!;
+    }
+    // Return "Unknown Device / Node" if name couldn't be resolved
+    return 'Unknown Device / Node';
+  }
+
   @override
   Widget build(BuildContext context) {
     final col = _levelColor();
-
-    // Prefer name if available, else fallback to ID
-    final displayName = (summary.name != null && summary.name!.isNotEmpty)
-        ? summary.name!
-        : deviceId;
+    final displayName = _getDisplayName();
 
     return Card(
       color: const Color(0xFF1C1F26),
       elevation: 3,
-      shadowColor: col.withOpacity(0.3),
+      shadowColor: col.withValues(alpha: 0.3),
       margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       child: ListTile(
@@ -36,7 +59,7 @@ class DeviceCard extends StatelessWidget {
         },
         leading: CircleAvatar(
           radius: 24,
-          backgroundColor: col.withOpacity(0.25),
+          backgroundColor: col.withValues(alpha: 0.25),
           child: Icon(
             summary.urgent
                 ? Icons.warning_amber_rounded

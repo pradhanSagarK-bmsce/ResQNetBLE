@@ -38,7 +38,6 @@ class _ScanScreenState extends State<ScanScreen>
   @override
   Widget build(BuildContext context) {
     final ble = Provider.of<BleService>(context);
-    final theme = Theme.of(context);
 
     return Scaffold(
       backgroundColor: const Color(0xFF0B1014),
@@ -82,8 +81,8 @@ class _ScanScreenState extends State<ScanScreen>
               boxShadow: [
                 BoxShadow(
                   color: ble.scanning
-                      ? Colors.orangeAccent.withOpacity(_glowAnim.value)
-                      : Colors.tealAccent.withOpacity(_glowAnim.value),
+                      ? Colors.orangeAccent.withValues(alpha: _glowAnim.value)
+                      : Colors.tealAccent.withValues(alpha: _glowAnim.value),
                   blurRadius: 20,
                   spreadRadius: 2,
                 ),
@@ -134,7 +133,7 @@ class _ScanScreenState extends State<ScanScreen>
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.4),
+                        color: Colors.black.withValues(alpha: 0.4),
                         blurRadius: 10,
                         offset: const Offset(0, 4),
                       ),

@@ -1,5 +1,5 @@
 // lib/services/ble_service.dart
-// FIXED: Proper GATT connection, service discovery, and notification subscription
+// FIXED: Correct flag parsing from manufacturer data
 
 import 'dart:async';
 import 'dart:typed_data';
@@ -185,8 +185,21 @@ class BleService extends ChangeNotifier {
     }
 
     adv.valid = true;
-    final flags = man[3];
-    adv.decodeFlags(flags);
+
+    // FIXED: Store raw flags byte for display
+    final flags = man[3] & 0xFF;
+    adv.flagsRaw = flags;
+
+    // FIXED: Parse individual flag bits correctly
+    // Each flag is only set if the corresponding bit is 1
+    adv.freefall = (flags & 0x01) != 0; // Bit 0
+    adv.vibration = (flags & 0x02) != 0; // Bit 1
+    adv.tilt = (flags & 0x04) != 0; // Bit 2
+    adv.fall = (flags & 0x08) != 0; // Bit 3
+    adv.shock = (flags & 0x10) != 0; // Bit 4
+    adv.urgent = (flags & 0x20) != 0; // Bit 5
+    adv.gpsValid = (flags & 0x40) != 0; // Bit 6
+    // Bit 7 reserved
 
     adv.batt = man[4] & 0xFF;
     adv.bpm = man[5] & 0xFF;
@@ -333,7 +346,6 @@ class BleService extends ChangeNotifier {
     notifyListeners();
   }
 
-  // FIXED: Improved connection flow with proper timing
   Future<void> manualConnect(String deviceId) async {
     _addLog('========================================');
     _addLog('🔗 Manual connect to: ${getDisplayName(deviceId)}');
@@ -364,7 +376,6 @@ class BleService extends ChangeNotifier {
                   isSubscribed = false;
                   notifyListeners();
 
-                  // FIXED: Proper sequencing with delays
                   _addLog('⏳ Waiting 800ms before discovery...');
                   await Future.delayed(const Duration(milliseconds: 800));
 
@@ -460,7 +471,6 @@ class BleService extends ChangeNotifier {
     }
   }
 
-  // FIXED: Better service discovery
   Future<void> _discoverAndLog(String deviceId) async {
     _addLog('🔍 Discovering services...');
     try {
@@ -481,7 +491,6 @@ class BleService extends ChangeNotifier {
 
           _addLog('    📝 Char: ${c.characteristicId} [${props.join(',')}]');
 
-          // Read Device Name if available
           if (s.serviceId.toString().toLowerCase() ==
                   gapService.toString().toLowerCase() &&
               c.characteristicId.toString().toLowerCase() ==
@@ -518,10 +527,8 @@ class BleService extends ChangeNotifier {
     notifyListeners();
   }
 
-  // FIXED: Improved auth and subscription
   Future<void> _authorizeAndSubscribe(String deviceId) async {
     try {
-      // Write auth token (even though it's disabled on ESP32, good practice)
       final token = ByteData(4)..setUint32(0, APP_AUTH_TOKEN, Endian.little);
       final ctrlChar = QualifiedCharacteristic(
         serviceId: serviceUuid,
@@ -540,7 +547,6 @@ class BleService extends ChangeNotifier {
         _addLog('⚠️ Auth write failed (may be OK): $e');
       }
 
-      // Try read ACK
       try {
         await Future.delayed(const Duration(milliseconds: 300));
         final ack = await _ble.readCharacteristic(ctrlChar);
@@ -552,7 +558,6 @@ class BleService extends ChangeNotifier {
         authorized = true;
       }
 
-      // FIXED: Subscribe to stream characteristic
       final streamChar = QualifiedCharacteristic(
         serviceId: serviceUuid,
         characteristicId: streamUuid,
@@ -565,13 +570,11 @@ class BleService extends ChangeNotifier {
       _addLog('Char: ${streamUuid.toString()}');
       _addLog('========================================');
 
-      // Cancel any existing subscription
       if (_notifySub != null) {
         await _notifySub!.cancel();
         _notifySub = null;
       }
 
-      // Subscribe with better error handling
       _notifySub = _ble
           .subscribeToCharacteristic(streamChar)
           .listen(
@@ -607,7 +610,6 @@ class BleService extends ChangeNotifier {
     }
   }
 
-  // FIXED: Better packet handler
   void _handleStreamPacket(List<int> raw) async {
     try {
       if (raw.length < 15) {
@@ -626,7 +628,6 @@ class BleService extends ChangeNotifier {
       final co2 = raw[12] | (raw[13] << 8);
       final flags = raw[14];
 
-      // Check for missed packets
       if (lastSeq != -1 && ((lastSeq + 1) & 0xFF) != seq) {
         missedPackets++;
         _addLog(
@@ -642,14 +643,13 @@ class BleService extends ChangeNotifier {
         '📊 Pkt#$seq: BPM=$bpm SpO2=$spo2 CO2=$co2 flags=0x${flags.toRadixString(16).padLeft(2, '0')}',
       );
 
-      // Send ACK
       if (connectedId != null) {
         final ackChar = QualifiedCharacteristic(
           serviceId: serviceUuid,
           characteristicId: controlUuid,
           deviceId: connectedId!,
         );
-        final ack = Uint8List.fromList([0x41, 0x43, 0x4B, seq]); // 'ACK' + seq
+        final ack = Uint8List.fromList([0x41, 0x43, 0x4B, seq]);
         try {
           await _ble.writeCharacteristicWithoutResponse(ackChar, value: ack);
         } catch (e) {
@@ -657,7 +657,6 @@ class BleService extends ChangeNotifier {
         }
       }
 
-      // Update device data
       if (connectedId != null && devices.containsKey(connectedId)) {
         devices[connectedId]!.updateFromTelemetry(
           seq: seq,

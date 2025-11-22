@@ -98,7 +98,7 @@ class _DetailScreenState extends State<DetailScreen> {
   }
 
   String _formatTs(int ts24) {
-    if (ts24 == 0) return '—';
+    if (ts24 == 0) return '–';
     try {
       final dt = DateTime.fromMillisecondsSinceEpoch(ts24 * 1000);
       return dt.toLocal().toString().substring(0, 19);
@@ -156,33 +156,40 @@ class _DetailScreenState extends State<DetailScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             width: double.infinity,
             color: Colors.black12,
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              alignment: WrapAlignment.start,
-              children: [
-                _statusChip(
-                  ble.status,
-                  isConnected && ble.authorized && ble.isSubscribed
-                      ? Colors.green
-                      : isConnected
-                      ? Colors.orange
-                      : Colors.grey,
-                ),
-                if (isConnected) ...[
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
                   _statusChip(
-                    ble.authorized ? '🔑 Auth' : '⏳ Auth...',
-                    ble.authorized ? Colors.teal : Colors.blueGrey,
+                    ble.status,
+                    isConnected && ble.authorized && ble.isSubscribed
+                        ? Colors.green
+                        : isConnected
+                        ? Colors.orange
+                        : Colors.grey,
                   ),
-                  _statusChip(
-                    ble.isSubscribed ? '📡 Live' : '⏳ Sub...',
-                    ble.isSubscribed ? Colors.purple : Colors.blueGrey,
-                  ),
-                  if (ble.connectionDuration != "—")
-                    _statusChip('⏱ ${ble.connectionDuration}', Colors.blue),
+                  if (isConnected) ...[
+                    const SizedBox(width: 8),
+                    _statusChip(
+                      ble.authorized ? '🔒 Auth' : '⏳ Auth...',
+                      ble.authorized ? Colors.teal : Colors.blueGrey,
+                    ),
+                    const SizedBox(width: 8),
+                    _statusChip(
+                      ble.isSubscribed ? '📡 Live' : '⏳ Sub...',
+                      ble.isSubscribed ? Colors.purple : Colors.blueGrey,
+                    ),
+                    if (ble.connectionDuration != "–") ...[
+                      const SizedBox(width: 8),
+                      _statusChip('⏱ ${ble.connectionDuration}', Colors.blue),
+                    ],
+                  ],
+                  if (adv != null) ...[
+                    const SizedBox(width: 8),
+                    _statusChip('${adv.rssi} dBm', Colors.indigo),
+                  ],
                 ],
-                if (adv != null) _statusChip('${adv.rssi} dBm', Colors.indigo),
-              ],
+              ),
             ),
           ),
         ),
@@ -214,6 +221,46 @@ class _DetailScreenState extends State<DetailScreen> {
                 ],
               ),
             ),
+    );
+  }
+
+  Widget _buildSmokeFireAlert(BuildContext context, String? id) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Colors.red.withOpacity(0.5), Colors.orange.withOpacity(0.5)],
+        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.red, width: 3),
+      ),
+      child: Row(
+        children: const [
+          Icon(Icons.local_fire_department, color: Colors.red, size: 40),
+          SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '🚨 SMOKE/FIRE DETECTED!',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.red,
+                    fontSize: 18,
+                  ),
+                ),
+                SizedBox(height: 4),
+                Text(
+                  'High CO₂ levels detected - possible fire hazard!',
+                  style: TextStyle(fontSize: 13, color: Colors.white),
+                ),
+              ],
+            ),
+          ),
+          Icon(Icons.warning, color: Colors.orange, size: 32),
+        ],
+      ),
     );
   }
 
@@ -320,7 +367,7 @@ class _DetailScreenState extends State<DetailScreen> {
               Expanded(
                 child: _infoTile(
                   'BPM',
-                  adv.bpm > 0 ? adv.bpm.toString() : '—',
+                  adv.bpm > 0 ? adv.bpm.toString() : '–',
                   icon: Icons.monitor_heart,
                   valueColor: _getVitalColor(adv.bpm, 60, 100),
                 ),
@@ -329,7 +376,7 @@ class _DetailScreenState extends State<DetailScreen> {
               Expanded(
                 child: _infoTile(
                   'SpO₂',
-                  adv.spo2 > 0 ? '${adv.spo2}%' : '—',
+                  adv.spo2 > 0 ? '${adv.spo2}%' : '–',
                   icon: Icons.opacity,
                   valueColor: _getVitalColor(adv.spo2, 90, 100),
                 ),
@@ -338,7 +385,7 @@ class _DetailScreenState extends State<DetailScreen> {
               Expanded(
                 child: _infoTile(
                   'CO₂',
-                  adv.co2 > 0 ? '${adv.co2}' : '—',
+                  adv.co2 > 0 ? '${adv.co2}' : '–',
                   icon: Icons.cloud,
                   valueColor: adv.co2 > 1000
                       ? Colors.orangeAccent
@@ -353,7 +400,7 @@ class _DetailScreenState extends State<DetailScreen> {
               Expanded(
                 child: _infoTile(
                   'Temperature',
-                  adv.tempC != 0.0 ? '${adv.tempC.toStringAsFixed(1)}°C' : '—',
+                  adv.tempC != 0.0 ? '${adv.tempC.toStringAsFixed(1)}°C' : '–',
                   icon: Icons.thermostat,
                 ),
               ),
@@ -361,7 +408,7 @@ class _DetailScreenState extends State<DetailScreen> {
               Expanded(
                 child: _infoTile(
                   'Battery',
-                  adv.batt > 0 ? '${adv.batt}%' : '—',
+                  adv.batt > 0 ? '${adv.batt}%' : '–',
                   icon: Icons.battery_charging_full,
                   valueColor: adv.batt < 20
                       ? Colors.redAccent
@@ -584,38 +631,6 @@ class _DetailScreenState extends State<DetailScreen> {
               ),
             ],
           ),
-          if (isConnected) ...[
-            const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.black26,
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    '📊 Stream Stats',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white70,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Seq: ${ble.lastSeq >= 0 ? ble.lastSeq : "—"} • Total: ${ble.totalPacketsReceived} • Missed: ${ble.missedPackets}',
-                    style: const TextStyle(fontSize: 11, color: Colors.white60),
-                  ),
-                  Text(
-                    'Last: ${ble.lastPacketTime != null ? _timeSince(ble.lastPacketTime!) : "—"}',
-                    style: const TextStyle(fontSize: 11, color: Colors.white60),
-                  ),
-                ],
-              ),
-            ),
-          ],
         ],
       ),
     );
@@ -641,7 +656,7 @@ class _DetailScreenState extends State<DetailScreen> {
           const SizedBox(height: 8),
           _infoTile(
             'Last Adv TS',
-            adv.ts > 0 ? _formatTs(adv.ts) : '—',
+            adv.ts > 0 ? _formatTs(adv.ts) : '–',
             icon: Icons.access_time,
           ),
           const SizedBox(height: 8),
@@ -714,6 +729,11 @@ class _DetailScreenState extends State<DetailScreen> {
                 adv.tilt ? Colors.teal : Colors.grey,
               ),
               _smallChip('Fall', adv.fall, adv.fall ? Colors.red : Colors.grey),
+              _smallChip(
+                'Smoke/Fire',
+                adv.smokeOrFire,
+                adv.smokeOrFire ? Colors.deepOrange : Colors.grey,
+              ),
             ],
           ),
           const SizedBox(height: 8),
@@ -830,6 +850,7 @@ class _DetailScreenState extends State<DetailScreen> {
     if (a.shock) parts.add('SHOCK');
     if (a.urgent) parts.add('URGENT');
     if (a.gpsValid) parts.add('GPS_OK');
+    if (a.smokeOrFire) parts.add('SMOKE/FIRE');
     return parts.isEmpty ? 'None' : parts.join(', ');
   }
 
@@ -838,6 +859,7 @@ class _DetailScreenState extends State<DetailScreen> {
       'valid': a.valid,
       'urgent': a.urgent,
       'gpsValid': a.gpsValid,
+      'smokeOrFire': a.smokeOrFire,
       'batt': a.batt,
       'bpm': a.bpm,
       'spo2': a.spo2,
