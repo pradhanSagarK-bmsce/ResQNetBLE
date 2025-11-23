@@ -81,23 +81,25 @@ class BleService extends ChangeNotifier {
 
   Future<bool> _ensurePermissions() async {
     try {
-      final statuses = await [
-        Permission.bluetooth,
-        Permission.bluetoothScan,
-        Permission.bluetoothConnect,
-        Permission.locationWhenInUse,
-      ].request();
+      Map<Permission, PermissionStatus> statuses;
+      if (await Permission.bluetoothScan.isDenied ||
+          await Permission.bluetoothConnect.isDenied) {
+        statuses = await [
+          Permission.bluetoothScan,
+          Permission.bluetoothConnect,
+          Permission.bluetoothAdvertise,
+          Permission.locationWhenInUse,
+        ].request();
+      } else {
+        statuses = await [Permission.locationWhenInUse].request();
+      }
 
-      bool allGranted = statuses.values.every(
-        (s) => s.isGranted || s.isLimited,
-      );
-      permissionStatus = allGranted ? 'granted' : 'denied';
+      bool granted = await Permission.locationWhenInUse.isGranted;
+      permissionStatus = granted ? 'granted' : 'denied';
       _addLog('Permissions: $permissionStatus');
-      return allGranted;
-    } catch (e, st) {
-      permissionStatus = 'error';
-      _addLog('Permission error: $e');
-      developer.log('Permission error', error: e, stackTrace: st);
+      return granted;
+    } catch (e) {
+      _addLog('Permission Error: $e');
       return false;
     }
   }
@@ -186,20 +188,8 @@ class BleService extends ChangeNotifier {
 
     adv.valid = true;
 
-    // FIXED: Store raw flags byte for display
     final flags = man[3] & 0xFF;
-    adv.flagsRaw = flags;
-
-    // FIXED: Parse individual flag bits correctly
-    // Each flag is only set if the corresponding bit is 1
-    adv.freefall = (flags & 0x01) != 0; // Bit 0
-    adv.vibration = (flags & 0x02) != 0; // Bit 1
-    adv.tilt = (flags & 0x04) != 0; // Bit 2
-    adv.fall = (flags & 0x08) != 0; // Bit 3
-    adv.shock = (flags & 0x10) != 0; // Bit 4
-    adv.urgent = (flags & 0x20) != 0; // Bit 5
-    adv.gpsValid = (flags & 0x40) != 0; // Bit 6
-    // Bit 7 reserved
+    adv.decodeFlags(flags);
 
     adv.batt = man[4] & 0xFF;
     adv.bpm = man[5] & 0xFF;
