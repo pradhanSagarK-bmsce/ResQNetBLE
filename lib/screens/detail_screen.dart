@@ -97,15 +97,19 @@ class _DetailScreenState extends State<DetailScreen> {
     );
   }
 
-  String _formatTs(int ts24) {
-    if (ts24 == 0) return '–';
-    try {
-      final dt = DateTime.fromMillisecondsSinceEpoch(ts24 * 1000);
-      return dt.toLocal().toString().substring(0, 19);
-    } catch (_) {
-      return ts24.toString();
-    }
-  }
+  // String _formatTs(int ts24) {
+  //   if (ts24 == 0) return '–';
+
+  //   try {
+  //     // ts24 = seconds since packet was generated (not Unix)
+  //     final now = DateTime.now();
+  //     final packetTime = now.subtract(Duration(seconds: ts24));
+
+  //     return packetTime.toLocal().toString().substring(0, 19);
+  //   } catch (_) {
+  //     return ts24.toString();
+  //   }
+  // }
 
   Color _getVitalColor(int value, int low, int high) {
     if (value == 0) return Colors.white60;
@@ -429,6 +433,8 @@ class _DetailScreenState extends State<DetailScreen> {
     String displayName,
     BuildContext context,
   ) {
+    final hasValidCoords = adv.gpsValid && (adv.lat != 0 || adv.lon != 0);
+
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -442,8 +448,8 @@ class _DetailScreenState extends State<DetailScreen> {
           Row(
             children: [
               Icon(
-                adv.gpsValid ? Icons.location_on : Icons.location_off,
-                color: adv.gpsValid ? Colors.orangeAccent : Colors.grey,
+                hasValidCoords ? Icons.location_on : Icons.location_off,
+                color: hasValidCoords ? Colors.orangeAccent : Colors.grey,
               ),
               const SizedBox(width: 8),
               const Text(
@@ -451,7 +457,7 @@ class _DetailScreenState extends State<DetailScreen> {
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
               ),
               const Spacer(),
-              if (adv.gpsValid)
+              if (hasValidCoords)
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 6,
@@ -470,11 +476,11 @@ class _DetailScreenState extends State<DetailScreen> {
           ),
           const SizedBox(height: 10),
           Text(
-            adv.gpsValid
+            hasValidCoords
                 ? '📍 ${adv.lat.toStringAsFixed(6)}, ${adv.lon.toStringAsFixed(6)}'
-                : '❌ No GPS Fix',
+                : '❌ No Location Data\n(Map will use RSSI estimation)',
             style: TextStyle(
-              color: adv.gpsValid ? Colors.white : Colors.white54,
+              color: hasValidCoords ? Colors.white : Colors.white54,
               fontSize: 14,
             ),
           ),
@@ -484,39 +490,23 @@ class _DetailScreenState extends State<DetailScreen> {
             runSpacing: 6,
             children: [
               ElevatedButton.icon(
-                onPressed: adv.gpsValid
-                    ? () {
-                        Navigator.pushNamed(
-                          context,
-                          '/map',
-                          arguments: {
-                            'lat': adv.lat,
-                            'lon': adv.lon,
-                            'label': displayName,
-                          },
-                        );
-                      }
-                    : null,
+                onPressed: () {
+                  Navigator.pushNamed(
+                    context,
+                    '/map',
+                    arguments: {
+                      'lat': hasValidCoords ? adv.lat : null,
+                      'lon': hasValidCoords ? adv.lon : null,
+                      'label': displayName,
+                      'rssi': adv.rssi,
+                      'device_id': displayName, // or use ID if available
+                    },
+                  );
+                },
                 icon: const Icon(Icons.map, size: 18),
                 label: const Text('Show on Map'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.deepPurple,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                ),
-              ),
-              ElevatedButton.icon(
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('🚨 Alert Team triggered')),
-                  );
-                },
-                icon: const Icon(Icons.notifications_active, size: 18),
-                label: const Text('Alert Team'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.orange,
                   padding: const EdgeInsets.symmetric(
                     horizontal: 12,
                     vertical: 8,
@@ -653,12 +643,12 @@ class _DetailScreenState extends State<DetailScreen> {
           ),
           const SizedBox(height: 12),
           _infoTile('Flags', _buildFlagsText(adv), icon: Icons.flag),
-          const SizedBox(height: 8),
-          _infoTile(
-            'Last Adv TS',
-            adv.ts > 0 ? _formatTs(adv.ts) : '–',
-            icon: Icons.access_time,
-          ),
+          // const SizedBox(height: 8),
+          // _infoTile(
+          //   'Last Adv TS',
+          //   adv.ts > 0 ? _formatTs(adv.ts) : '–',
+          //   icon: Icons.access_time,
+          // ),
           const SizedBox(height: 8),
           _infoTile(
             'Last Seen',

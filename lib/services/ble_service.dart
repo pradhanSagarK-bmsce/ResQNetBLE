@@ -9,10 +9,12 @@ import 'dart:developer' as developer;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:flutter_ble_peripheral/flutter_ble_peripheral.dart';
 import '../models/adv_summary.dart';
 
 class BleService extends ChangeNotifier {
   final FlutterReactiveBle _ble = FlutterReactiveBle();
+  final FlutterBlePeripheral _peripheral = FlutterBlePeripheral();
 
   final Map<String, DiscoveredDevice> _seenDevicesRaw = {};
   final Map<String, AdvSummary> devices = {};
@@ -39,7 +41,9 @@ class BleService extends ChangeNotifier {
   final List<DiscoveredService> _discoveredServices = [];
 
   DateTime? lastConnectAttempt;
+  DateTime? _lastRelayTime;
   final Duration connectBackoff = const Duration(seconds: 6);
+  final Set<String> _dedupCache = {}; // Cache of relayed packet signatures
 
   List<String> get logs => List.unmodifiable(_logs);
   List<DiscoveredService> get discoveredServices =>
@@ -102,6 +106,91 @@ class BleService extends ChangeNotifier {
       _addLog('Permission Error: $e');
       return false;
     }
+  }
+
+  /// Starts advertising the given data as a relay.
+  /// Increments hop count before sending.
+  Future<void> startRelayAdvertising(AdvSummary data, Uint8List originalManData, String directDeviceId) async {
+    // Throttle relay updates to avoid PlatformException(18) (Advertising too frequently)
+    final now = DateTime.now();
+    if (_lastRelayTime != null && now.difference(_lastRelayTime!) < const Duration(milliseconds: 1000)) {
+      return;
+    }
+    _lastRelayTime = now;
+
+    // Don't relay if hop count is too high (e.g., > 10) to prevent storms
+    if (data.hopCount >= 10) return;
+
+    final newHopCount = data.hopCount + 1;
+    
+    // Determine Source ID bytes
+    Uint8List? sourceIdBytes;
+    if (data.originalSenderId != null) {
+      sourceIdBytes = _deviceIdToBytes(data.originalSenderId!);
+    } else {
+      sourceIdBytes = _deviceIdToBytes(directDeviceId);
+    }
+
+    if (sourceIdBytes == null) {
+        // Could not determine source ID (e.g. non-MAC ID), abort relay
+        return;
+    }
+
+    // Construct Manufacturer Data: 
+    // [0-20]: Original 21 bytes (CompanyID + Data + CRC)
+    // [21]: HopCount
+    // [22-27]: Source ID (6 bytes)
+    
+    final List<int> relayData = [];
+    if (originalManData.length >= 21) {
+      relayData.addAll(originalManData.sublist(0, 21));
+    } else {
+      return;
+    }
+    
+    relayData.add(newHopCount);
+    relayData.addAll(sourceIdBytes);
+
+    // NOTE: flutter_ble_peripheral usage:
+    // AdvertiseData(manufacturerId: 0x02E5, manufacturerData: [bytes...])
+    
+    final payload = Uint8List.fromList(relayData.sublist(2)); // Strip 0x02E5
+
+    final advertiseData = AdvertiseData(
+      manufacturerId: 0x02E5,
+      manufacturerData: payload,
+      includeDeviceName: false,
+    );
+
+    _addLog('📢 Relaying: Hop $newHopCount from ${_bytesToDeviceId(sourceIdBytes)}');
+
+    try {
+      if (await _peripheral.isAdvertising) {
+        await _peripheral.stop();
+      }
+      await _peripheral.start(advertiseData: advertiseData);
+    } catch (e) {
+      _addLog('⚠️ Relay failed: $e');
+    }
+  }
+
+  Uint8List? _deviceIdToBytes(String id) {
+    try {
+      // Remove colons and parse
+      final clean = id.replaceAll(':', '').replaceAll('-', '');
+      if (clean.length != 12) return null; // Not a MAC
+      final bytes = Uint8List(6);
+      for (int i = 0; i < 6; i++) {
+        bytes[i] = int.parse(clean.substring(i * 2, i * 2 + 2), radix: 16);
+      }
+      return bytes;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String _bytesToDeviceId(Uint8List bytes) {
+    return bytes.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(':');
   }
 
   String? _parseLocalNameFromAdBytes(Uint8List? advBytes) {
@@ -169,6 +258,19 @@ class BleService extends ChangeNotifier {
       adv.valid = false;
       if (advName != null) adv.name = advName;
       return adv;
+    }
+
+    // Check for Hop Count (Byte 21, 0-indexed)
+    if (man.length >= 22) {
+      adv.hopCount = man[21];
+    } else {
+      adv.hopCount = 0; // Direct from ESP32
+    }
+
+    // Check for Source ID (Bytes 22-27)
+    if (man.length >= 28) {
+        final sourceBytes = man.sublist(22, 28);
+        adv.originalSenderId = _bytesToDeviceId(sourceBytes);
     }
 
     final calc = _crc8Maxim(man.sublist(0, 20));
@@ -291,8 +393,52 @@ class BleService extends ChangeNotifier {
                 d.rssi,
                 advName: chosenName,
               );
-              devices[d.id] = parsed;
+              
+              // Determine the logical device ID (Original Sender if relayed, else Advertiser)
+              String logicalId = d.id;
+              if (parsed.valid && parsed.originalSenderId != null) {
+                  logicalId = parsed.originalSenderId!;
+              }
+
+              // RELAY LOGIC:
+              // If this is a valid packet and newer than what we have, relay it.
+              if (parsed.valid) {
+                 bool isNewer = false;
+                 if (!devices.containsKey(logicalId)) {
+                   isNewer = true;
+                 } else {
+                   final old = devices[logicalId]!;
+                   // Compare timestamps (ts is 24-bit wrapping seconds)
+                   // Simple check: if ts is different, we assume it's new for now. 
+                   if (parsed.ts != old.ts) isNewer = true;
+                 }
+
+                 // Deduplication check
+                 // We create a signature: LogicalID + TS
+                 final sig = '$logicalId:${parsed.ts}';
+                 if (_dedupCache.contains(sig)) {
+                     isNewer = false; // Already processed/relayed this specific packet
+                 }
+
+                 if (isNewer) {
+                   // It's a new packet!
+                   devices[logicalId] = parsed;
+                   _dedupCache.add(sig);
+                   if (_dedupCache.length > 100) _dedupCache.clear(); // Simple GC
+
+                   // Trigger Relay
+                   startRelayAdvertising(parsed, man, d.id);
+                 } else {
+                    // Update RSSI/LastSeen even if data isn't new
+                    // Only update if we have an entry
+                    if (devices.containsKey(logicalId)) {
+                        devices[logicalId]!.rssi = d.rssi;
+                        devices[logicalId]!.lastSeen = DateTime.now();
+                    }
+                 }
+              }
             } else {
+              // Non-mesh packet or invalid
               devices.putIfAbsent(d.id, () => AdvSummary());
               final advEntry = devices[d.id]!;
               advEntry.rssi = d.rssi;
@@ -302,6 +448,19 @@ class BleService extends ChangeNotifier {
 
             if (chosenName != null && chosenName.isNotEmpty) {
               deviceLocalNames[d.id] = chosenName;
+              // Also update the logical device name if we can
+              // Note: If it's relayed, the name in the advertisement might be the RELAY's name, not the SOURCE's name.
+              // The source name is not currently in the mesh packet.
+              // So we might want to be careful here.
+              // If hopCount > 0, the name we see is the Relay's name.
+              // We probably shouldn't overwrite the Source's name with the Relay's name.
+              // Only update name if hopCount == 0.
+              
+              // However, we don't have 'parsed' here easily accessible if we are in the 'else' block or if we didn't parse it yet.
+              // But we did parse it above.
+              
+              // Let's just update d.id's name in deviceLocalNames (which is physical).
+              // And only update devices[d.id].name if it exists.
               if (devices.containsKey(d.id)) devices[d.id]!.name = chosenName;
             }
 
@@ -655,6 +814,104 @@ class BleService extends ChangeNotifier {
           co2: co2,
           flags: flags,
         );
+        
+        // RELAY LOGIC (Source):
+        // We are connected to the source, so we are Hop 0.
+        // We need to construct the manufacturer data to advertise it.
+        // We don't have the original raw manufacturer bytes here because we got it via Stream.
+        // We must reconstruct it or just rely on the fact that we have the data.
+        // Actually, to relay, we need to broadcast the SAME format as the ESP32.
+        // The ESP32 format is:
+        // [0-1] CoID (0x02E5)
+        // [2] Counter (0x00 usually, or rolling) - Wait, ESP32 code defines the format.
+        // Let's look at _parseManufacturerData to see the format.
+        // It expects 21 bytes.
+        // We can reconstruct a valid packet from the telemetry data we just got.
+        
+        // However, reconstructing the EXACT CRC might be tricky if we don't have all fields 
+        // (e.g. the exact 'ts' sent in the adv vs the stream might differ slightly if they are async).
+        // BUT, the user requirement says "if one device discover the esp32... send telemetry to them".
+        // The connected device receives data via NOTIFY.
+        // It should broadcast this data.
+        
+        // Let's reconstruct a packet:
+        // We need to match the format in _parseManufacturerData.
+        // Byte 0-1: 0xE502 (Little Endian for 0x02E5)
+        // Byte 2: 0x00 (padding/counter?) - In parse it checks man[3] for flags. 
+        // Wait, _parseManufacturerData:
+        // company = (man[0] & 0xFF) | ((man[1] & 0xFF) << 8);
+        // flags = man[3]
+        // So man[2] is skipped/unused in parse? 
+        // Let's check: 
+        // final flags = man[3] & 0xFF;
+        // adv.batt = man[4]
+        // ...
+        
+        // We can reconstruct it.
+        final constructed = Uint8List(21);
+        constructed[0] = 0xE5;
+        constructed[1] = 0x02;
+        constructed[2] = 0x00; // Unused?
+        constructed[3] = flags;
+        // We don't have battery in the stream packet! 
+        // The stream packet (handleStreamPacket) has: seq, bpm, spo2, co2, flags.
+        // It DOES NOT have battery, temp, lat, lon, ts.
+        // This is a problem. The stream data is a subset (or different set) than the Adv data.
+        
+        // If we are connected, we might also be scanning the advertisements from the SAME device?
+        // Usually when connected, advertisements stop or are not scanned by the same device easily.
+        
+        // If we want to relay the FULL state, we need the full state.
+        // The `devices[connectedId]` object has the latest merged state (from Adv + Stream).
+        // So we can use the values from there.
+        
+        final current = devices[connectedId]!;
+        
+        constructed[3] = flags; // Update with latest flags
+        constructed[4] = current.batt; // Use cached battery
+        constructed[5] = bpm;
+        constructed[6] = spo2;
+        constructed[7] = co2 & 0xFF;
+        constructed[8] = (co2 >> 8) & 0xFF;
+        
+        // Temp
+        int tempCenti = (current.tempC * 100).round();
+        constructed[9] = tempCenti & 0xFF;
+        constructed[10] = (tempCenti >> 8) & 0xFF;
+        
+        // Lat/Lon
+        int latE5 = (current.lat * 1e5).round();
+        constructed[11] = latE5 & 0xFF;
+        constructed[12] = (latE5 >> 8) & 0xFF;
+        constructed[13] = (latE5 >> 16) & 0xFF; // 24-bit
+        
+        int lonE5 = (current.lon * 1e5).round();
+        constructed[14] = lonE5 & 0xFF;
+        constructed[15] = (lonE5 >> 8) & 0xFF;
+        constructed[16] = (lonE5 >> 16) & 0xFF;
+        
+        // TS
+        int ts = current.ts; // Use cached TS
+        // If we want to indicate this is FRESH, maybe we should update TS?
+        // But TS is usually device timestamp. 
+        constructed[17] = ts & 0xFF;
+        constructed[18] = (ts >> 8) & 0xFF;
+        constructed[19] = (ts >> 16) & 0xFF;
+        
+        // CRC
+        // We need to calculate CRC for the first 20 bytes.
+        constructed[20] = _crc8Maxim(constructed.sublist(0, 20));
+        
+        // Now relay this constructed packet!
+        // Since we are the source (connected), hopCount is 0.
+        // But startRelayAdvertising increments it.
+        // So we pass a dummy object with hopCount = -1? No, we want it to be Hop 1 when it leaves us.
+        // So we say our current hop count is 0.
+        // startRelayAdvertising will make it 1.
+        
+        current.hopCount = 0; 
+        startRelayAdvertising(current, constructed, connectedId!);
+
         notifyListeners();
       }
     } catch (e, st) {

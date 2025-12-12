@@ -445,6 +445,11 @@ class _TelemetryScreenState extends State<TelemetryScreen>
             '${adv.rssi} dBm',
             Icons.signal_cellular_4_bar,
           ),
+          _statusRow(
+            'Source',
+            adv.hopCount == 0 ? 'Direct (Hop 0)' : 'Relay (Hop ${adv.hopCount})',
+            Icons.hub,
+          ),
         ],
       ),
     );

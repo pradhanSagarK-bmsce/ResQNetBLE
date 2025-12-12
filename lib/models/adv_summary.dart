@@ -11,6 +11,8 @@ class AdvSummary {
   bool urgent = false;
   bool gpsValid = false;
   int flagsRaw = 0; // raw flags byte from manufacturer packet (if present)
+  int hopCount = 0; // Number of hops this packet has traveled
+  String? originalSenderId; // ID of the original sender (if relayed)
 
   // sensor / vitals (from manufacturer adv or stream)
   int batt = 0;
@@ -108,6 +110,7 @@ class AdvSummary {
     double? humidity,
     double? speed,
     double? altitude,
+    int? hopCount,
   }) {
     if (bpm != null) this.bpm = bpm;
     if (spo2 != null) this.spo2 = spo2;
@@ -129,6 +132,7 @@ class AdvSummary {
     if (humidity != null) this.humidity = humidity;
     if (speed != null) this.speed = speed;
     if (altitude != null) this.altitude = altitude;
+    if (hopCount != null) this.hopCount = hopCount;
     if (seq != null) {
       streamSeq = seq;
       lastTelemetryTime = DateTime.now();
@@ -182,6 +186,8 @@ class AdvSummary {
       'fall': fall,
       'tilt': tilt,
       'smokeOrFire': smokeOrFire,
+      'hopCount': hopCount,
+      'originalSenderId': originalSenderId,
     };
   }
 
@@ -236,6 +242,6 @@ class AdvSummary {
 
   @override
   String toString() {
-    return 'AdvSummary(name=$name valid=$valid urgent=$urgent gpsValid=$gpsValid flagsRaw=0x${flagsRaw.toRadixString(16)} batt=$batt bpm=$bpm spo2=$spo2 co2=$co2 tempC=$tempC lat=$lat lon=$lon ts=$ts rssi=$rssi lastSeen=$lastSeen freefall=$freefall vibration=$vibration shock=$shock fall=$fall tilt=$tilt smokeOrFire=$smokeOrFire acc=($accX,$accY,$accZ) gyr=($gyrX,$gyrY,$gyrZ) pressure=$pressure humidity=$humidity speed=$speed altitude=$altitude streamSeq=$streamSeq lastTelemetryTime=$lastTelemetryTime)';
+    return 'AdvSummary(name=$name valid=$valid urgent=$urgent gpsValid=$gpsValid flagsRaw=0x${flagsRaw.toRadixString(16)} batt=$batt bpm=$bpm spo2=$spo2 co2=$co2 tempC=$tempC lat=$lat lon=$lon ts=$ts rssi=$rssi lastSeen=$lastSeen freefall=$freefall vibration=$vibration shock=$shock fall=$fall tilt=$tilt smokeOrFire=$smokeOrFire acc=($accX,$accY,$accZ) gyr=($gyrX,$gyrY,$gyrZ) pressure=$pressure humidity=$humidity speed=$speed altitude=$altitude streamSeq=$streamSeq lastTelemetryTime=$lastTelemetryTime hopCount=$hopCount originalSenderId=$originalSenderId)';
   }
 }

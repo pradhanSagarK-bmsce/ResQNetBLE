@@ -1,0 +1,73 @@
+Resolving dependencies...
+Downloading packages...
+  characters 1.4.0 (1.4.1 available)
+  flutter_lints 5.0.0 (6.0.0 available)
+  http 1.5.0 (1.6.0 available)
+  lints 5.1.1 (6.0.0 available)
+  matcher 0.12.17 (0.12.18 available)
+  material_color_utilities 0.11.1 (0.13.0 available)
+  mgrs_dart 2.0.0 (3.0.0 available)
+  package_info_plus 8.3.1 (9.0.0 available)
+  path_provider_android 2.2.20 (2.2.22 available)
+  path_provider_foundation 2.4.3 (2.5.1 available)
+  proj4dart 2.1.0 (3.0.0 available)
+  protobuf 2.1.0 (6.0.0 available)
+  test_api 0.7.7 (0.7.8 available)
+  unicode 0.3.1 (1.1.8 available)
+Got dependencies!
+14 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+Analyzing ResQNetBLE...                                         
+
+   info - 'useMaterial3' is deprecated and shouldn't be used. Use a ThemeData constructor (.from, .light, or .dark) instead. These constructors all have a useMaterial3 argument, and they set appropriate default values based on its value. See the useMaterial3 API documentation for full details. This feature was deprecated after v3.13.0-0.2.pre - lib\main.dart:29:11 - deprecated_member_use
+   info - Use interpolation to compose strings and values - lib\models\adv_summary.dart:150:32 - prefer_interpolation_to_compose_strings
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\debug_logs_screen.dart:195:22 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\debug_logs_screen.dart:197:41 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\debug_logs_screen.dart:280:38 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\debug_logs_screen.dart:287:36 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\debug_logs_screen.dart:292:39 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\debug_logs_screen.dart:297:37 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\debug_logs_screen.dart:304:39 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\debug_logs_screen.dart:309:37 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\debug_logs_screen.dart:314:39 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\debug_logs_screen.dart:326:63 - deprecated_member_use
+warning - The declaration '_buildSmokeFireAlert' isn't referenced - lib\screens\detail_screen.dart:231:10 - unused_element
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\detail_screen.dart:236:31 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\detail_screen.dart:236:63 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\detail_screen.dart:281:28 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\detail_screen.dart:282:27 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\detail_screen.dart:286:50 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\detail_screen.dart:467:41 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\detail_screen.dart:808:30 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\detail_screen.dart:824:35 - deprecated_member_use
+warning - Unused import: 'package:provider/provider.dart' - lib\screens\map_screen.dart:2:8 - unused_import
+warning - Unused import: '../services/ble_service.dart' - lib\screens\map_screen.dart:7:8 - unused_import
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\map_screen.dart:153:44 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\map_screen.dart:172:32 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\map_screen.dart:173:38 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\map_screen.dart:243:37 - deprecated_member_use
+warning - Unused import: 'dart:math' - lib\screens\telemetry_screen.dart:7:8 - unused_import
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\telemetry_screen.dart:109:53 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\telemetry_screen.dart:289:32 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\telemetry_screen.dart:289:56 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\telemetry_screen.dart:293:59 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\telemetry_screen.dart:383:34 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\telemetry_screen.dart:525:34 - deprecated_member_use
+warning - The declaration '_timeSince' isn't referenced - lib\screens\telemetry_screen.dart:552:10 - unused_element
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\telemetry_screen.dart:589:24 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\telemetry_screen.dart:589:48 - deprecated_member_use
+   info - The import of 'dart:typed_data' is unnecessary because all of the used elements are also provided by the import of 'package:flutter/foundation.dart' - lib\services\ble_service.dart:5:8 - unnecessary_import
+   info - The constant name 'APP_AUTH_TOKEN' isn't a lowerCamelCase identifier - lib\services\ble_service.dart:82:20 - constant_identifier_names
+warning - The value of the local variable 'statuses' isn't used - lib\services\ble_service.dart:88:41 - unused_local_variable
+   info - The variable name 'lat_e5' isn't a lowerCamelCase identifier - lib\services\ble_service.dart:314:11 - non_constant_identifier_names
+   info - The variable name 'lon_e5' isn't a lowerCamelCase identifier - lib\services\ble_service.dart:315:11 - non_constant_identifier_names
+   info - 'discoverServices' is deprecated and shouldn't be used. Use `discoverAllServices` and `getDiscoverServices` - lib\services\ble_service.dart:626:35 - deprecated_member_use
+   info - Statements in an if should be enclosed in a block - lib\services\ble_service.dart:660:19 - curly_braces_in_flow_control_structures
+   info - Angle brackets will be interpreted as HTML - lib\utils\adv_parser.dart:6:49 - unintended_html_in_doc_comment
+warning - The value of the local variable 'proto' isn't used - lib\utils\adv_parser.dart:14:11 - unused_local_variable
+   info - The variable name 'lat_e5' isn't a lowerCamelCase identifier - lib\utils\adv_parser.dart:30:9 - non_constant_identifier_names
+   info - The variable name 'lon_e5' isn't a lowerCamelCase identifier - lib\utils\adv_parser.dart:33:9 - non_constant_identifier_names
+warning - Unused import: 'package:resqnet_ble/main.dart' - test\widget_test.dart:11:8 - unused_import
+   info - Parameter 'key' could be a super parameter - test\widget_test.dart:16:9 - use_super_parameters
+
+50 issues found. (ran in 1.9s)

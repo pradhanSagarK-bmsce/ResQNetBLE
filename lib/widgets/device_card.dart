@@ -78,7 +78,8 @@ class DeviceCard extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
         ),
         subtitle: Text(
-          'BPM: ${summary.bpm}  |  SpO₂: ${summary.spo2}%  |  CO₂: ${summary.co2} ppm',
+          'BPM: ${summary.bpm}  |  SpO₂: ${summary.spo2}%  |  CO₂: ${summary.co2} ppm\n'
+          '${summary.hopCount == 0 ? "Direct Connection" : "Mesh Relay (Hop ${summary.hopCount})" }',
           style: const TextStyle(color: Colors.white70, fontSize: 13),
         ),
         trailing: Column(
